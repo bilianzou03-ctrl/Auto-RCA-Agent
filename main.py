@@ -20,8 +20,8 @@ class AnalyzeRequest(BaseModel):
     target: str
 
 # 填入你完整的 Key
-DEEPSEEK_KEY = "sk-0a0960648a42450fb10102ff5b9968aa" 
-SILICONFLOW_KEY = "sk-dqbnxiyhmfibshifwihmzppfjdvbqhscnyyyqqdngoutylgw"
+DEEPSEEK_KEY = "sk-..." 
+SILICONFLOW_KEY = "sk-..."
 
 client = openai.OpenAI(
     api_key=SILICONFLOW_KEY,
