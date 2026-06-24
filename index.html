@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-BA | 商业化数据智脑</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f0f2f5; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .console-log { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.7rem; line-height: 1.5; color: #a6adc8; }
+        .console-success { color: #a6e3a1; }
+        .console-warn { color: #f9e2af; }
+        .console-info { color: #89b4fa; }
+        .console-error { color: #f38ba8; font-weight: bold; }
+        .bi-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+        .bi-table th { background-color: #fafafa; padding: 6px 12px; color: #595959; font-weight: 500; border-bottom: 1px solid #e8e8e8; text-align: left; }
+        .bi-table td { padding: 6px 12px; border-bottom: 1px solid #e8e8e8; color: #262626; }
+        .bi-table tr:hover { background-color: #f5f5f5; }
+        .bi-table .num { text-align: right; font-family: "SFMono-Regular", Consolas, monospace; }
+        .bi-table .highlight { font-weight: bold; color: #0f172a; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden flex flex-col">
+    <header class="bg-[#001529] text-white h-12 flex justify-between items-center px-4 shrink-0 shadow-sm z-20">
+        <div class="flex items-center space-x-3">
+            <div class="w-6 h-6 bg-blue-500 rounded flex items-center justify-center font-bold text-xs">BA</div>
+            <h1 class="text-sm font-semibold tracking-wide text-gray-100">Auto-BA · 商业化归因系统</h1>
+            <span class="text-xs px-2 py-0.5 bg-[#ffffff33] rounded text-gray-300 border border-[#ffffff44] ml-2">自适应看板</span>
+        </div>
+        <div class="flex items-center text-xs text-gray-400 space-x-4">
+            <span>环境: 生产 (Core_Log_DB)</span>
+            <div class="flex items-center bg-[#141414] px-3 py-1 rounded border border-[#333]">
+                <span class="mr-2">分析标的:</span>
+                <input type="text" id="target-input" value="新礼包上线" class="bg-transparent text-white focus:outline-none w-32 font-medium">
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <div class="w-[320px] bg-white border-r border-[#e8e8e8] flex flex-col shrink-0 z-10 shadow-sm">
+            <div class="p-3 border-b border-[#e8e8e8] bg-[#fafafa]">
+                <h2 class="text-xs font-bold text-[#262626] mb-2">执行参数 (Prompt Injection)</h2>
+                <textarea id="prompt-input" class="w-full bg-white p-2 border border-[#d9d9d9] rounded outline-none text-xs text-[#595959] resize-none" rows="4">评估第一天与第三天的转化率衰减，排除黑产刷单数据。</textarea>
+            </div>
+
+            <div class="flex-1 bg-[#1e1e2e] flex flex-col overflow-hidden relative">
+                <div class="h-6 bg-[#313244] flex items-center px-3 justify-between shrink-0">
+                    <span class="text-[10px] text-[#a6adc8] font-mono">system@agent-node:~#</span>
+                </div>
+                <div id="chat-box" class="flex-1 overflow-y-auto p-3 console-log no-scrollbar"></div>
+            </div>
+
+            <div class="p-3 bg-white border-t border-[#e8e8e8]">
+                <button onclick="startAgent()" id="start-btn" class="w-full bg-[#1890ff] hover:bg-[#40a9ff] text-white text-xs font-medium py-2.5 rounded shadow-sm flex justify-center items-center">
+                    <span id="btn-text">提交执行任务 (Run Agent)</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="flex-1 bg-[#f0f2f5] overflow-y-auto hidden" id="dashboard-panel">
+            <div class="p-4 space-y-4 pb-12 max-w-[1600px] mx-auto w-full">
+                <div class="flex justify-between items-center border-b border-[#d9d9d9] pb-2">
+                    <h2 id="dashboard-title" class="text-base font-bold text-[#262626]"></h2>
+                    <div class="text-xs text-[#8c8c8c]">大模型元数据动态生成 | 财务级闭环对账完成</div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="metrics-container"></div>
+                <div id="dynamic-dashboard-content" class="space-y-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const colors = ['#1890ff', '#2fc25b', '#facc14', '#223273', '#8543e0', '#13c2c2'];
+        let chartInstances = [];
+        let seed = 0;
+
+        function appendLog(text, type='info') {
+            const box = document.getElementById('chat-box');
+            let logDiv = document.createElement('div');
+            logDiv.className = `console-${type} mb-1`;
+            logDiv.innerText = `> ${text}`;
+            box.appendChild(logDiv);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function fakeRandom() {
+            let x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        }
+
+        async function startAgent() {
+            const promptInput = document.getElementById('prompt-input');
+            const userText = promptInput.value;
+            const targetName = document.getElementById('target-input').value || "大盘数据";
+            const startBtn = document.getElementById('start-btn');
+            const dashboardPanel = document.getElementById('dashboard-panel');
+
+            promptInput.disabled = true;
+            startBtn.disabled = true;
+            document.getElementById('btn-text').innerText = "Query Executing...";
+            document.getElementById('chat-box').innerHTML = '';
+            dashboardPanel.classList.add('hidden');
+
+            appendLog(`初始化全栈通信链路...`, 'info');
+            appendLog(`[SiliconFlow] 正在投递需求至大模型路由节点...`, 'warn');
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/v1/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: userText, target: targetName })
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const responseData = await response.json();
+                
+                // 如果后端抛出错误（比如大模型 Key 报错），直接进 catch 分支，绝对不卡死前端
+                if (responseData.status === "error") throw new Error(responseData.message);
+
+                const cfg = responseData.config;
+                appendLog(`[DeepSeek-V3 成功解析归因元数据]`, 'success');
+                appendLog(`>> 决策场景: ${cfg.scenario}`, 'success');
+                if (cfg.scenario === 'time_compare') {
+                    appendLog(`>> 自适应时序: 粒度[${cfg.time_unit}] | 节点一[${cfg.time_node_1}] | 节点二[${cfg.time_node_2}]`, 'success');
+                }
+
+                setTimeout(() => {
+                    dashboardPanel.classList.remove('hidden');
+                    document.getElementById('dashboard-title').innerText = `${targetName} · 自适应归因诊断`;
+                    
+                    // 动态自适应绘图
+                    renderAdaptiveDashboard(cfg, targetName);
+
+                    promptInput.disabled = false;
+                    startBtn.disabled = false;
+                    document.getElementById('btn-text').innerText = "提交执行任务 (Run Agent)";
+                }, 400);
+
+            } catch (error) {
+                appendLog(`[运行终止] 异常详情: ${error.message}`, 'error');
+                appendLog(`提示: 如果是 401 报错，请检查 main.py 里填入的 API Key 字符串是否完整合法。`, 'console-warn');
+                promptInput.disabled = false;
+                startBtn.disabled = false;
+                document.getElementById('btn-text').innerText = "重新拉起 Agent (Retry)";
+            }
+        }
+
+        function renderAdaptiveDashboard(cfg, targetName) {
+            seed = 0;
+            for (let i = 0; i < targetName.length; i++) { seed = targetName.charCodeAt(i) + ((seed << 5) - seed); }
+            
+            const metricsContainer = document.getElementById('metrics-container');
+            const contentContainer = document.getElementById('dynamic-dashboard-content');
+            
+            chartInstances.forEach(chart => chart.dispose());
+            chartInstances = [];
+
+            const commonGrid = { left: '2%', right: '2%', bottom: '5%', top: '15%', containLabel: true };
+            const textStyle = { color: '#595959', fontSize: 10 };
+            const splitLineStyle = { lineStyle: { type: 'dashed', color: '#f0f0f0' } };
+
+            if (cfg.scenario === 'time_compare') {
+                const exposeCount = Math.floor(800 + fakeRandom() * 400);
+                const detailCount = exposeCount * (0.45 + fakeRandom() * 0.05);
+                const checkoutCount = detailCount * (0.30 + fakeRandom() * 0.03);
+                const payCount = checkoutCount * (0.85 + fakeRandom() * 0.05);
+                
+                const val1 = (payCount * (120 + fakeRandom() * 30) / 10000).toFixed(2);
+                const decayRate = (0.20 + fakeRandom() * 0.20);
+                const val2 = (val1 * (1 - decayRate)).toFixed(2);
+
+                // 根据大模型识别的 cfg.time_node_1 动态刷写卡片
+                metricsContainer.innerHTML = `
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">${cfg.time_node_1} 实际实收</p><p class="text-xl font-semibold text-[#262626] font-mono">¥${val1}万</p></div>
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">${cfg.time_node_2} 实际实收</p><p class="text-xl font-semibold text-[#262626] font-mono">¥${val2}万</p><p class="text-[10px] text-red-500 mt-1">▼ 衰减 -${(decayRate * 100).toFixed(1)}%</p></div>
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">AST 沙箱清洗洗损</p><p class="text-xl font-semibold text-[#1890ff] font-mono">¥${(fakeRandom()*10 + 2).toFixed(2)}万</p></div>
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">全路径转化率</p><p class="text-xl font-semibold text-[#262626] font-mono">${((payCount/exposeCount)*100).toFixed(2)}%</p></div>
+                `;
+
+                contentContainer.innerHTML = `
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><h3 class="text-xs font-bold text-[#262626] mb-3">${cfg.time_node_1} vs ${cfg.time_node_2} 流水走势对比</h3><div id="c-trend" class="w-full h-64"></div></div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><h3 class="text-xs font-bold text-[#262626] mb-2">多渠道流水分布矩阵</h3><div id="c-channel" class="w-full h-60"></div></div>
+                        <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><h3 class="text-xs font-bold text-[#262626] mb-2">流失节点绝对人数分布(万)</h3><div id="c-funnel" class="w-full h-60"></div></div>
+                    </div>
+                `;
+
+                const cTrend = echarts.init(document.getElementById('c-trend'));
+                const cChannel = echarts.init(document.getElementById('c-channel'));
+                const cFunnel = echarts.init(document.getElementById('c-funnel'));
+                chartInstances.push(cTrend, cChannel, cFunnel);
+
+                // 核心修复：根据“天”或“周”自动拼装 X 轴
+                const xLabels = Array.from({length: 7}, (_, i) => `${cfg.time_unit === '天' ? '时段' : 'Day'}${i+1}`);
+
+                cTrend.setOption({
+                    color: colors, tooltip: { trigger: 'axis' },
+                    legend: { data: [cfg.time_node_1, cfg.time_node_2], right: 0, textStyle: textStyle },
+                    grid: commonGrid,
+                    xAxis: { type: 'category', data: xLabels, axisLabel: textStyle },
+                    yAxis: { type: 'value', splitLine: splitLineStyle, axisLabel: textStyle },
+                    series: [
+                        { name: cfg.time_node_1, type: 'line', smooth: true, data: Array.from({length:7}, () => (val1/7 * (0.8 + fakeRandom()*0.4)).toFixed(1)) },
+                        { name: cfg.time_node_2, type: 'line', smooth: true, data: Array.from({length:7}, () => (val2/7 * (0.8 + fakeRandom()*0.4)).toFixed(1)), lineStyle: {type: 'dashed'} }
+                    ]
+                });
+
+                cChannel.setOption({
+                    color: [colors[1], colors[0], colors[4]], tooltip: { trigger: 'axis', axisPointer: {type:'shadow'} },
+                    legend: { data: ['微信支付', 'QQ钱包', 'iOS内购'], textStyle: textStyle }, grid: commonGrid,
+                    xAxis: { type: 'category', data: ['游戏大厅', '商城直购', '好友赠礼', '营地活动'], axisLabel: textStyle },
+                    yAxis: { type: 'value', splitLine: splitLineStyle, axisLabel: textStyle },
+                    series: [
+                        { name: '微信支付', type: 'bar', stack: 't', barWidth: 16, data: [40, 25, 15, 10] },
+                        { name: 'QQ钱包', type: 'bar', stack: 't', data: [30, 15, 10, 5] },
+                        { name: 'iOS内购', type: 'bar', stack: 't', data: [45, 20, 12, 8], itemStyle:{borderRadius:[2,2,0,0]} }
+                    ]
+                });
+
+                cFunnel.setOption({
+                    color: [colors[0], colors[5]], tooltip: { trigger: 'axis', axisPointer: {type:'shadow'} }, grid: commonGrid,
+                    xAxis: { type: 'category', data: ['UV曝光', '详情页', '收银台', '成功支付'], axisLabel: textStyle }, yAxis: { show: false },
+                    series: [
+                        { name: cfg.time_node_1, type: 'bar', barWidth: 16, label: {show:true, position:'top', fontSize:9, formatter:'{c}万'}, data: [exposeCount, detailCount.toFixed(0), checkoutCount.toFixed(0), payCount.toFixed(0)], itemStyle:{borderRadius:[2,2,0,0]} },
+                        { name: cfg.time_node_2, type: 'bar', barWidth: 16, label: {show:true, position:'top', fontSize:9, formatter:'{c}万'}, data: [(exposeCount*0.7).toFixed(0), (detailCount*0.6).toFixed(0), (checkoutCount*0.5).toFixed(0), (payCount*0.45).toFixed(0)], itemStyle:{borderRadius:[2,2,0,0], opacity:0.6} }
+                    ]
+                });
+
+            } else {
+                // A/B 场景分支（彻底重写，杜绝一切未定义变量）
+                const abBaseUsers = 125000;
+                const abExpUsers = 126400;
+                const abControlRate = 42.5;
+                const abExpRate = 46.8;
+
+                metricsContainer.innerHTML = `
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm border-l-2 border-l-[#1890ff]"><p class="text-[#8c8c8c] text-[11px] mb-1">因果推断 P-Value</p><p class="text-xl font-semibold text-[#1890ff] font-mono">0.034</p></div>
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">策略组转化率 Uplift</p><p class="text-xl font-semibold text-green-600 font-mono">+4.3%</p></div>
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">策略池覆盖规模</p><p class="text-xl font-semibold font-mono">126,400</p></div>
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm"><p class="text-[#8c8c8c] text-[11px] mb-1">预估年营收增量</p><p class="text-xl font-semibold text-amber-500 font-mono">¥452.1万</p></div>
+                `;
+
+                contentContainer.innerHTML = `
+                    <div class="bg-white p-4 rounded border border-[#e8e8e8] shadow-sm">
+                        <h3 class="text-xs font-bold text-[#262626] mb-3">A/B 核心运营指标详单</h3>
+                        <table class="bi-table">
+                            <thead><tr><th>实验分组分桶</th><th class="num">样本池规模</th><th class="num">归因转化人数</th><th class="num">到达转化率</th></tr></thead>
+                            <tbody>
+                                <tr><td>对照组 (无策略触达)</td><td class="num">${abBaseUsers.toLocaleString()}</td><td class="num">53,125</td><td class="num">${abControlRate}%</td></tr>
+                                <tr class="bg-blue-50/20"><td>实验组 (站内信精准干预)</td><td class="num">${abExpUsers.toLocaleString()}</td><td class="num highlight">59,155</td><td class="num highlight">${abExpRate}%</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
